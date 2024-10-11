@@ -1,5 +1,11 @@
 import requests
 from bs4 import BeautifulSoup
+from functools import reduce
+from datetime import datetime
+
+# conversion rates
+MDL_TO_EUR = 1 / 19  # 1 EUR = 19 MDL
+EUR_TO_MDL = 19      # 1 EUR = 19 MDL
 
 # Send HTTP GET request
 url = 'https://999.md/ro/list/transport/motorcycles'
@@ -20,14 +26,29 @@ def validate_string_field(field):
 def validate_price_field(price):
     """ Validate price to ensure it's an integer. """
     try:
-        # Removing any non-digit characters and converting to integer
         return int(''.join(filter(str.isdigit, price)))
     except ValueError:
         return None
 
 
+def convert_to_eur(price, currency):
+    """ Convert MDL to EUR, if already EUR return as is. """
+    if currency == "MDL":
+        return price * MDL_TO_EUR
+    return price
+
+def convert_to_mdl(price, currency):
+    """ Convert EUR to MDL, if already MDL return as is. """
+    if currency == "EUR":
+        return price * EUR_TO_MDL
+    return price
+
+
 # Parse the HTML content
 soup = BeautifulSoup(response.content, 'html.parser')
+
+# to store all products
+products = []
 
 for product in soup.find_all('li', class_='ads-list-photo-item'):
     link = product.find('a')
@@ -37,7 +58,7 @@ for product in soup.find_all('li', class_='ads-list-photo-item'):
         product_response = requests.get(product_url)
         product_soup = BeautifulSoup(product_response.content, 'html.parser')
 
-        # Make dictionary
+        # Dictionary to store product data
         product_data = {}
 
         # Extract additional info
@@ -60,11 +81,30 @@ for product in soup.find_all('li', class_='ads-list-photo-item'):
             price_value = validate_price_field(price_value_tag.text.strip())  # Convert price to integer
             currency_value = validate_string_field(currency_tag.text.strip())  # Extract currency
         else:
-            price_value = "Negociabil"
+            price_value = None
             currency_value = ""
 
-        combined_price = f"{price_value} {currency_value}"
-        product_data["Price"] = combined_price
+        if price_value:
+            product_data["Price"] = price_value
+            product_data["Currency"] = currency_value
+            products.append(product_data)
 
-        print(f"Product Data: {product_data}")
-        print(f"Product Link: {product_url}\n")
+# convert MDL to EUR
+mapped_products = list(map(lambda p: {
+    **p,
+    "Price": convert_to_eur(p["Price"], p["Currency"])
+}, products))
+
+# filter products in a price range
+filtered_products = list(filter(lambda p: 100 <= p["Price"] <= 15000, mapped_products))
+
+# reduce to sum up the prices of filtered products
+total_price = reduce(lambda acc, p: acc + p["Price"], filtered_products, 0)
+
+timestamp = datetime.utcnow()
+
+print("Filtered Products:")
+for product in filtered_products:
+    print(product,"\n")
+print(f"Total Price of Filtered Products (EUR): {total_price}")
+print(f"UTC Timestamp: {timestamp}")
