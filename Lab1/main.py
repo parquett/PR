@@ -1,30 +1,93 @@
-import requests
+import socket
+import ssl
 from bs4 import BeautifulSoup
 from functools import reduce
 from datetime import datetime
 
-# conversion rates
+# Conversion rates
 MDL_TO_EUR = 1 / 19  # 1 EUR = 19 MDL
-EUR_TO_MDL = 19      # 1 EUR = 19 MDL
-
-# Send HTTP GET request
-url = 'https://999.md/ro/list/transport/motorcycles'
-response = requests.get(url)
-
-# Check the response
-if response.status_code == 200:
-    print("Success:", response.status_code)
-else:
-    print("Failed:", response.status_code)
 
 
-def validate_string_field(field):
-    """ Remove extra spaces from string fields. """
-    return field.strip()
+def fetch_data_via_socket(host, port, path):
+    """Fetch data from a website using TCP sockets."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+
+    # Wrap the socket with SSL for HTTPS
+    context = ssl.create_default_context()
+    with context.wrap_socket(sock, server_hostname=host) as ssock:
+        try:
+            ssock.connect((host, port))
+        except Exception as e:
+            print(f"Error connecting to {host}:{port} - {e}")
+            return None
+
+        # Prepare and send GET request
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            f"Connection: close\r\n\r\n"
+        )
+        ssock.sendall(request.encode())
+
+        # Receive the response
+        response = b""
+        while True:
+            part = ssock.recv(4096)
+            if not part:
+                break
+            response += part
+
+    return response
+
+
+def extract_body(response):
+    """Extract the body from the HTTP response."""
+    response_str = response.decode('utf-8')
+    header, _, body = response_str.partition("\r\n\r\n")
+    return body
+
+
+def fetch_product_details(product_url):
+    """Fetch details of a single product."""
+    host = "999.md"
+    port = 443  # HTTPS port
+    path = product_url
+
+    # Fetch data via socket for product details
+    response = fetch_data_via_socket(host, port, path)
+
+    if response is None:
+        return None
+
+    body = extract_body(response)
+    soup = BeautifulSoup(body, 'html.parser')
+
+    # Extract product data
+    product_data = {}
+
+    for feature in soup.find_all('span', class_='adPage__content__features__key'):
+        key = feature.text.strip()
+        value_tag = feature.find_next('span', class_='adPage__content__features__value')
+        value = value_tag.text.strip() if value_tag else "-"
+        product_data[key] = value
+
+    # Extract price and currency
+    price_value_tag = soup.find('span', class_='adPage__content__price-feature__prices__price__value')
+    currency_tag = soup.find('span', class_='adPage__content__price-feature__prices__price__currency')
+
+    if price_value_tag and currency_tag:
+        price_value = validate_price_field(price_value_tag.text.strip())
+        currency_value = currency_tag.text.strip()
+
+        if price_value is not None:
+            product_data["Price"] = price_value
+            product_data["Currency"] = currency_value
+
+    return product_data
 
 
 def validate_price_field(price):
-    """ Validate price to ensure it's an integer. """
+    """Validate price to ensure it's an integer."""
     try:
         return int(''.join(filter(str.isdigit, price)))
     except ValueError:
@@ -32,79 +95,52 @@ def validate_price_field(price):
 
 
 def convert_to_eur(price, currency):
-    """ Convert MDL to EUR, if already EUR return as is. """
-    if currency == "MDL":
-        return price * MDL_TO_EUR
-    return price
-
-def convert_to_mdl(price, currency):
-    """ Convert EUR to MDL, if already MDL return as is. """
-    if currency == "EUR":
-        return price * EUR_TO_MDL
-    return price
+    """Convert MDL to EUR, if already EUR return as is."""
+    return price * MDL_TO_EUR if currency == "MDL" else price
 
 
-# Parse the HTML content
-soup = BeautifulSoup(response.content, 'html.parser')
+def calculate_total_price(products):
+    """Calculate total price of products in EUR."""
+    total_price_mdl = reduce(lambda acc, p: acc + p["Price"], products, 0)
+    return total_price_mdl * MDL_TO_EUR
 
-# to store all products
-products = []
 
-for product in soup.find_all('li', class_='ads-list-photo-item'):
-    link = product.find('a')
+def main():
+    host = "999.md"
+    port = 443  # HTTPS port
+    path = "/ro/list/transport/motorcycles"
 
-    if link and 'href' in link.attrs:
-        product_url = f"https://999.md{link['href']}"
-        product_response = requests.get(product_url)
-        product_soup = BeautifulSoup(product_response.content, 'html.parser')
+    response = fetch_data_via_socket(host, port, path)
 
-        # Dictionary to store product data
-        product_data = {}
+    if response is None:
+        print("Failed to retrieve data.")
+        return
 
-        # Extract additional info
-        for feature in product_soup.find_all('span', class_='adPage__content__features__key'):
-            key = validate_string_field(feature.text.strip())
-            value_tag = feature.find_next('span', class_='adPage__content__features__value')
+    body = extract_body(response)
 
-            if value_tag:
-                value = validate_string_field(value_tag.text.strip())
-            else:
-                value = "-"
+    # Parse the HTML content
+    soup = BeautifulSoup(body, 'html.parser')
 
-            product_data[key] = value
+    products_list = []
 
-        # Extract the price
-        price_value_tag = product_soup.find('span', class_='adPage__content__price-feature__prices__price__value')
-        currency_tag = product_soup.find('span', class_='adPage__content__price-feature__prices__price__currency')
+    for product in soup.find_all('li', class_='ads-list-photo-item'):
+        link = product.find('a')
 
-        if price_value_tag and currency_tag:
-            price_value = validate_price_field(price_value_tag.text.strip())  # Convert price to integer
-            currency_value = validate_string_field(currency_tag.text.strip())  # Extract currency
-        else:
-            price_value = None
-            currency_value = ""
+        if link and 'href' in link.attrs:
+            product_url = f"https://999.md{link['href']}"
+            product_details = fetch_product_details(product_url)
 
-        if price_value:
-            product_data["Price"] = price_value
-            product_data["Currency"] = currency_value
-            products.append(product_data)
+            if product_details and "Price" in product_details:
+                products_list.append(product_details)
 
-# convert MDL to EUR
-mapped_products = list(map(lambda p: {
-    **p,
-    "Price": convert_to_eur(p["Price"], p["Currency"])
-}, products))
+    total_price_eur = calculate_total_price(products_list)
 
-# filter products in a price range
-filtered_products = list(filter(lambda p: 100 <= p["Price"] <= 15000, mapped_products))
+    for product in products_list:
+        print(product)
 
-# reduce to sum up the prices of filtered products
-total_price = reduce(lambda acc, p: acc + p["Price"], filtered_products, 0)
+    print(f"\nTotal Price of Filtered Products (EUR): {total_price_eur:.2f}")
+    print(f"UTC Timestamp: {datetime.utcnow()}")
 
-timestamp = datetime.utcnow()
 
-print("Filtered Products:")
-for product in filtered_products:
-    print(product,"\n")
-print(f"Total Price of Filtered Products (EUR): {total_price}")
-print(f"UTC Timestamp: {timestamp}")
+if __name__ == "__main__":
+    main()
