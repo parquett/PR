@@ -109,6 +109,39 @@ def filter_products(products):
     return filtered_products, total_price_eur
 
 
+def serialize_to_json(products):
+    """Serialize products to JSON format."""
+    json_output = "[\n"
+
+    for product in products:
+        json_output += "  {\n"
+        for key, value in product.items():
+            json_output += f'    "{key}": "{value}",\n'
+        json_output = json_output.rstrip(",\n") + "\n"  # Remove last comma
+        json_output += "  },\n"
+
+    json_output += "]"
+
+    print("JSON Output:")
+    print(json_output)
+
+
+def serialize_to_xml(products):
+    """Serialize products to XML format."""
+    xml_output = "<products>\n"
+
+    for product in products:
+        xml_output += "  <product>\n"
+        for key, value in product.items():
+            xml_output += f'    <{key}>{value}</{key}>\n'
+        xml_output += "  </product>\n"
+
+    xml_output += "</products>"
+
+    print("XML Output:")
+    print(xml_output)
+
+
 def main():
     host = "999.md"
     port = 443  # HTTPS port
@@ -143,9 +176,11 @@ def main():
     for product in filtered_products:
         print(product)
 
+    serialize_to_json(filtered_products)
+    serialize_to_xml(filtered_products)
+
     print(f"\nTotal Price of Filtered Products (EUR): {total_price_eur:.2f}")
     print(f"UTC Timestamp: {datetime.utcnow()}")
-
 
 if __name__ == "__main__":
     main()
