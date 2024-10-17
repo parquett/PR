@@ -99,10 +99,14 @@ def convert_to_eur(price, currency):
     return price * MDL_TO_EUR if currency == "MDL" else price
 
 
-def calculate_total_price(products):
-    """Calculate total price of products in EUR."""
-    total_price_mdl = reduce(lambda acc, p: acc + p["Price"], products, 0)
-    return total_price_mdl * MDL_TO_EUR
+def filter_products(products):
+    """Filter products in a specific price range."""
+    filtered_products = [p for p in products if
+                         "Price" in p and 100 <= convert_to_eur(p["Price"], p["Currency"]) <= 15000]
+
+    total_price_eur = reduce(lambda acc, p: acc + convert_to_eur(p["Price"], p["Currency"]), filtered_products, 0)
+
+    return filtered_products, total_price_eur
 
 
 def main():
@@ -133,9 +137,10 @@ def main():
             if product_details and "Price" in product_details:
                 products_list.append(product_details)
 
-    total_price_eur = calculate_total_price(products_list)
+    # Filter products based on price range and calculate total price
+    filtered_products, total_price_eur = filter_products(products_list)
 
-    for product in products_list:
+    for product in filtered_products:
         print(product)
 
     print(f"\nTotal Price of Filtered Products (EUR): {total_price_eur:.2f}")
