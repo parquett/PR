@@ -1,7 +1,30 @@
 from flask import Flask, request, jsonify
 import sqlite3
+import os
 
 app = Flask(__name__)
+
+UPLOAD_FOLDER = 'uploads'
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# File upload route
+@app.route('/upload', methods=['POST'])
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({"status": "error", "message": "No file part in the request"}), 400
+
+    file = request.files['file']
+
+    if file.filename == '':
+        return jsonify({"status": "error", "message": "No file selected"}), 400
+
+    if file and file.filename.endswith('.json'):
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], file.filename)
+        file.save(file_path)
+        return jsonify({"status": "success", "message": f"File '{file.filename}' uploaded successfully!"}), 201
+
+    return jsonify({"status": "error", "message": "Invalid file type, only JSON files are allowed"}), 400
 
 def get_db_connection():
     connection = sqlite3.connect('moto_data.db')
