@@ -35,9 +35,14 @@ def create_entry():
 @app.route('/read', methods=['GET'])
 def read_entries():
     entry_id = request.args.get('id')
+    offset = int(request.args.get('offset', 0))  # Default offset is 0
+    limit = int(request.args.get('limit', 10))  # Default limit is 10
+
     try:
         with get_db_connection() as connection:
             cursor = connection.cursor()
+
+            # Fetch a specific entry if `id` is provided
             if entry_id:
                 cursor.execute("SELECT * FROM moto_data WHERE id = ?", (entry_id,))
                 entry = cursor.fetchone()
@@ -45,11 +50,13 @@ def read_entries():
                     return jsonify(dict(entry)), 200
                 return jsonify({"status": "error", "message": "Entry not found"}), 404
             else:
-                cursor.execute("SELECT * FROM moto_data")
+                # Fetch entries with pagination
+                cursor.execute("SELECT * FROM moto_data LIMIT ? OFFSET ?", (limit, offset))
                 entries = cursor.fetchall()
                 return jsonify([dict(row) for row in entries]), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 400
+
 
 # Update an entry by ID
 @app.route('/update', methods=['PUT'])
