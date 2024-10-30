@@ -1,78 +1,93 @@
+from flask import Flask, request, jsonify
 import sqlite3
-import json
 
-connection = sqlite3.connect('moto_data.db')
-cursor = connection.cursor()
+app = Flask(__name__)
 
-cursor.execute('''
-    CREATE TABLE IF NOT EXISTS moto_data (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        marca TEXT,
-        model TEXT,
-        tip_oferta TEXT,
-        inmatriculare TEXT,
-        stare TEXT,
-        tip_moto TEXT,
-        anul_fabricatiei INTEGER,
-        capacitate_cilindrica INTEGER,
-        rulaj INTEGER,
-        putere INTEGER,
-        culoarea TEXT,
-        cutia_de_viteze TEXT,
-        price REAL,
-        currency TEXT
-    )
-''')
+def get_db_connection():
+    connection = sqlite3.connect('moto_data.db')
+    connection.row_factory = sqlite3.Row
+    return connection
 
+# Add a new entry to the database
+@app.route('/create', methods=['POST'])
+def create_entry():
+    data = request.get_json()
+    try:
+        with get_db_connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute('''
+                INSERT INTO moto_data (marca, model, tip_oferta, inmatriculare, stare, tip_moto,
+                                       anul_fabricatiei, capacitate_cilindrica, rulaj, putere,
+                                       culoarea, cutia_de_viteze, price, currency)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                data.get("Marcă"), data.get("Model"), data.get("Tip ofertă"), data.get("Înmatriculare"),
+                data.get("Stare"), data.get("Tip moto"), int(data.get("Anul fabricației", 0)),
+                int(data.get("Capacitate cilindrică", 0)), int(data.get("Rulaj", 0)), int(data.get("Putere (CP)", 0)),
+                data.get("Culoarea"), data.get("Cutia de viteze"), float(data.get("Price", 0)), data.get("Currency")
+            ))
+            connection.commit()
+        return jsonify({"status": "success", "message": "Entry created successfully!"}), 201
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
 
-def load_json_data(file_path):
-    with open(file_path, 'r', encoding='utf-8') as json_file:
-        return json.load(json_file)
+# Get all entries or a specific entry by ID
+@app.route('/read', methods=['GET'])
+def read_entries():
+    entry_id = request.args.get('id')
+    try:
+        with get_db_connection() as connection:
+            cursor = connection.cursor()
+            if entry_id:
+                cursor.execute("SELECT * FROM moto_data WHERE id = ?", (entry_id,))
+                entry = cursor.fetchone()
+                if entry:
+                    return jsonify(dict(entry)), 200
+                return jsonify({"status": "error", "message": "Entry not found"}), 404
+            else:
+                cursor.execute("SELECT * FROM moto_data")
+                entries = cursor.fetchall()
+                return jsonify([dict(row) for row in entries]), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
 
+# Update an entry by ID
+@app.route('/update', methods=['PUT'])
+def update_entry():
+    entry_id = request.args.get('id')
+    data = request.get_json()
+    try:
+        with get_db_connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute('''
+                UPDATE moto_data SET marca = ?, model = ?, tip_oferta = ?, inmatriculare = ?, 
+                stare = ?, tip_moto = ?, anul_fabricatiei = ?, capacitate_cilindrica = ?, rulaj = ?, 
+                putere = ?, culoarea = ?, cutia_de_viteze = ?, price = ?, currency = ?
+                WHERE id = ?
+            ''', (
+                data.get("Marcă"), data.get("Model"), data.get("Tip ofertă"), data.get("Înmatriculare"),
+                data.get("Stare"), data.get("Tip moto"), int(data.get("Anul fabricației", 0)),
+                int(data.get("Capacitate cilindrică", 0)), int(data.get("Rulaj", 0)), int(data.get("Putere (CP)", 0)),
+                data.get("Culoarea"), data.get("Cutia de viteze"), float(data.get("Price", 0)), data.get("Currency"),
+                entry_id
+            ))
+            connection.commit()
+        return jsonify({"status": "success", "message": "Entry updated successfully!"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
 
-def insert_data(data):
-    for entry in data:
-        # Data cleaning to convert string fields into appropriate formats
-        anul_fabricatiei = int(entry.get("Anul fabricației", 0))
+# Delete an entry by ID
+@app.route('/delete', methods=['DELETE'])
+def delete_entry():
+    entry_id = request.args.get('id')
+    try:
+        with get_db_connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute("DELETE FROM moto_data WHERE id = ?", (entry_id,))
+            connection.commit()
+        return jsonify({"status": "success", "message": "Entry deleted successfully!"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 400
 
-        # Remove spaces and convert capacity to integer
-        capacitate_cilindrica = int(
-            entry.get("Capacitate cilindrică", "0 cm³").replace(" cm³", "").replace(" ", "").strip())
-
-        # Remove spaces and convert rulaj to integer
-        rulaj = int(entry.get("Rulaj", "0 km").replace(" km", "").replace(" ", "").strip())
-
-        # Remove spaces and convert power to integer
-        putere = int(entry.get("Putere (CP)", "0 CP").replace(" CP", "").replace(" ", "").strip())
-
-        # Convert price to float after removing commas and extra spaces
-        price = float(entry.get("Price", "0").replace(",", "").strip())
-
-        # Insert the cleaned data into the database
-        cursor.execute('''
-            INSERT INTO moto_data (marca, model, tip_oferta, inmatriculare, stare, tip_moto,
-                                   anul_fabricatiei, capacitate_cilindrica, rulaj, putere,
-                                   culoarea, cutia_de_viteze, price, currency)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            entry.get("Marcă", "N/A"), entry.get("Model", "N/A"), entry.get("Tip ofertă", "N/A"),
-            entry.get("Înmatriculare", "N/A"), entry.get("Stare", "N/A"), entry.get("Tip moto", "N/A"),
-            anul_fabricatiei, capacitate_cilindrica, rulaj, putere, entry.get("Culoarea", "N/A"),
-            entry.get("Cutia de viteze", "N/A"), price, entry.get("Currency", "N/A")
-        ))
-
-    # Commit changes to the database
-    connection.commit()
-    print("Data insertion complete.")
-
-
-scrapped_data = load_json_data('scrapped_data.json')
-
-insert_data(scrapped_data)
-
-cursor.execute("SELECT * FROM moto_data")
-rows = cursor.fetchall()
-for row in rows:
-    print(row)
-
-connection.close()
+if __name__ == '__main__':
+    app.run(debug=True)
