@@ -1,12 +1,41 @@
 from flask import Flask, request, jsonify
-import sqlite3
+from flask_sqlalchemy import SQLAlchemy
 import os
 
 app = Flask(__name__)
 
+# Configure the SQLAlchemy database URI using an environment variable
+app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///moto_data.db')
+app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
+db = SQLAlchemy(app)
+
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+
+# Define the MotoData model
+class MotoData(db.Model):
+    __tablename__ = 'moto_data'
+    id = db.Column(db.Integer, primary_key=True)
+    marca = db.Column(db.String(80), nullable=False)
+    model = db.Column(db.String(80), nullable=False)
+    tip_oferta = db.Column(db.String(80))
+    inmatriculare = db.Column(db.String(80))
+    stare = db.Column(db.String(80))
+    tip_moto = db.Column(db.String(80))
+    anul_fabricatiei = db.Column(db.Integer)
+    capacitate_cilindrica = db.Column(db.Integer)
+    rulaj = db.Column(db.Integer)
+    putere = db.Column(db.Integer)
+    culoarea = db.Column(db.String(80))
+    cutia_de_viteze = db.Column(db.String(80))
+    price = db.Column(db.Float)
+    currency = db.Column(db.String(10))
+
+# Initialize the database tables
+@app.before_first_request
+def create_tables():
+    db.create_all()
 
 # File upload route
 @app.route('/upload', methods=['POST'])
@@ -15,7 +44,6 @@ def upload_file():
         return jsonify({"status": "error", "message": "No file part in the request"}), 400
 
     file = request.files['file']
-
     if file.filename == '':
         return jsonify({"status": "error", "message": "No file selected"}), 400
 
@@ -26,30 +54,29 @@ def upload_file():
 
     return jsonify({"status": "error", "message": "Invalid file type, only JSON files are allowed"}), 400
 
-def get_db_connection():
-    connection = sqlite3.connect('moto_data.db')
-    connection.row_factory = sqlite3.Row
-    return connection
-
 # Add a new entry to the database
 @app.route('/create', methods=['POST'])
 def create_entry():
     data = request.get_json()
     try:
-        with get_db_connection() as connection:
-            cursor = connection.cursor()
-            cursor.execute('''
-                INSERT INTO moto_data (marca, model, tip_oferta, inmatriculare, stare, tip_moto,
-                                       anul_fabricatiei, capacitate_cilindrica, rulaj, putere,
-                                       culoarea, cutia_de_viteze, price, currency)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                data.get("Marcă"), data.get("Model"), data.get("Tip ofertă"), data.get("Înmatriculare"),
-                data.get("Stare"), data.get("Tip moto"), int(data.get("Anul fabricației", 0)),
-                int(data.get("Capacitate cilindrică", 0)), int(data.get("Rulaj", 0)), int(data.get("Putere (CP)", 0)),
-                data.get("Culoarea"), data.get("Cutia de viteze"), float(data.get("Price", 0)), data.get("Currency")
-            ))
-            connection.commit()
+        entry = MotoData(
+            marca=data.get("Marcă"),
+            model=data.get("Model"),
+            tip_oferta=data.get("Tip ofertă"),
+            inmatriculare=data.get("Înmatriculare"),
+            stare=data.get("Stare"),
+            tip_moto=data.get("Tip moto"),
+            anul_fabricatiei=int(data.get("Anul fabricației", 0)),
+            capacitate_cilindrica=int(data.get("Capacitate cilindrică", 0)),
+            rulaj=int(data.get("Rulaj", 0)),
+            putere=int(data.get("Putere (CP)", 0)),
+            culoarea=data.get("Culoarea"),
+            cutia_de_viteze=data.get("Cutia de viteze"),
+            price=float(data.get("Price", 0)),
+            currency=data.get("Currency")
+        )
+        db.session.add(entry)
+        db.session.commit()
         return jsonify({"status": "success", "message": "Entry created successfully!"}), 201
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 400
@@ -62,46 +89,62 @@ def read_entries():
     limit = int(request.args.get('limit', 10))  # Default limit is 10
 
     try:
-        with get_db_connection() as connection:
-            cursor = connection.cursor()
-
-            # Fetch a specific entry if `id` is provided
-            if entry_id:
-                cursor.execute("SELECT * FROM moto_data WHERE id = ?", (entry_id,))
-                entry = cursor.fetchone()
-                if entry:
-                    return jsonify(dict(entry)), 200
-                return jsonify({"status": "error", "message": "Entry not found"}), 404
-            else:
-                # Fetch entries with pagination
-                cursor.execute("SELECT * FROM moto_data LIMIT ? OFFSET ?", (limit, offset))
-                entries = cursor.fetchall()
-                return jsonify([dict(row) for row in entries]), 200
+        if entry_id:
+            entry = MotoData.query.get(entry_id)
+            if entry:
+                return jsonify({
+                    "id": entry.id,
+                    "marca": entry.marca,
+                    "model": entry.model,
+                    "tip_oferta": entry.tip_oferta,
+                    "inmatriculare": entry.inmatriculare,
+                    "stare": entry.stare,
+                    "tip_moto": entry.tip_moto,
+                    "anul_fabricatiei": entry.anul_fabricatiei,
+                    "capacitate_cilindrica": entry.capacitate_cilindrica,
+                    "rulaj": entry.rulaj,
+                    "putere": entry.putere,
+                    "culoarea": entry.culoarea,
+                    "cutia_de_viteze": entry.cutia_de_viteze,
+                    "price": entry.price,
+                    "currency": entry.currency
+                }), 200
+            return jsonify({"status": "error", "message": "Entry not found"}), 404
+        else:
+            entries = MotoData.query.offset(offset).limit(limit).all()
+            return jsonify([{
+                "id": entry.id,
+                "marca": entry.marca,
+                "model": entry.model,
+                "tip_oferta": entry.tip_oferta,
+                "inmatriculare": entry.inmatriculare,
+                "stare": entry.stare,
+                "tip_moto": entry.tip_moto,
+                "anul_fabricatiei": entry.anul_fabricatiei,
+                "capacitate_cilindrica": entry.capacitate_cilindrica,
+                "rulaj": entry.rulaj,
+                "putere": entry.putere,
+                "culoarea": entry.culoarea,
+                "cutia_de_viteze": entry.cutia_de_viteze,
+                "price": entry.price,
+                "currency": entry.currency
+            } for entry in entries]), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 400
-
 
 # Update an entry by ID
 @app.route('/update', methods=['PUT'])
 def update_entry():
     entry_id = request.args.get('id')
     data = request.get_json()
+    entry = MotoData.query.get(entry_id)
+    if not entry:
+        return jsonify({"status": "error", "message": "Entry not found"}), 404
+
     try:
-        with get_db_connection() as connection:
-            cursor = connection.cursor()
-            cursor.execute('''
-                UPDATE moto_data SET marca = ?, model = ?, tip_oferta = ?, inmatriculare = ?, 
-                stare = ?, tip_moto = ?, anul_fabricatiei = ?, capacitate_cilindrica = ?, rulaj = ?, 
-                putere = ?, culoarea = ?, cutia_de_viteze = ?, price = ?, currency = ?
-                WHERE id = ?
-            ''', (
-                data.get("Marcă"), data.get("Model"), data.get("Tip ofertă"), data.get("Înmatriculare"),
-                data.get("Stare"), data.get("Tip moto"), int(data.get("Anul fabricației", 0)),
-                int(data.get("Capacitate cilindrică", 0)), int(data.get("Rulaj", 0)), int(data.get("Putere (CP)", 0)),
-                data.get("Culoarea"), data.get("Cutia de viteze"), float(data.get("Price", 0)), data.get("Currency"),
-                entry_id
-            ))
-            connection.commit()
+        for field, value in data.items():
+            setattr(entry, field, value)
+        db.session.commit()
         return jsonify({"status": "success", "message": "Entry updated successfully!"}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 400
@@ -110,14 +153,16 @@ def update_entry():
 @app.route('/delete', methods=['DELETE'])
 def delete_entry():
     entry_id = request.args.get('id')
+    entry = MotoData.query.get(entry_id)
+    if not entry:
+        return jsonify({"status": "error", "message": "Entry not found"}), 404
+
     try:
-        with get_db_connection() as connection:
-            cursor = connection.cursor()
-            cursor.execute("DELETE FROM moto_data WHERE id = ?", (entry_id,))
-            connection.commit()
+        db.session.delete(entry)
+        db.session.commit()
         return jsonify({"status": "success", "message": "Entry deleted successfully!"}), 200
     except Exception as e:
         return jsonify({"status": "error", "message": str(e)}), 400
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, host='0.0.0.0', port=5000)
