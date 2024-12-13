@@ -141,3 +141,110 @@ class Node(threading.Thread):
                 self.send_heartbeats()
                 self.last_heartbeat = time.time()
 
+    def handle_append_entries(self, msg, addr):
+        term = msg["term"]
+        leaderId = msg["leaderId"]
+        self.log(f"Received AppendEntries (heartbeat) from leader {leaderId}, term {term}.")
+
+        if term < self.current_term:
+            self.log("Heartbeat from stale leader; ignoring.")
+            response = {
+                "type": APPEND_ENTRIES_RESPONSE,
+                "term": self.current_term,
+                "success": False
+            }
+            self.send_message(addr, response)
+            return
+
+        if term > self.current_term:
+            self.log(f"Newer leader detected, updating term from {self.current_term} to {term}.")
+            self.current_term = term
+            self.role = FOLLOWER
+            self.voted_for = None
+
+        if self.role != FOLLOWER:
+            self.log("Was candidate/leader, now reverting to follower due to valid leader's heartbeat.")
+            self.role = FOLLOWER
+
+        self.election_timeout = self.reset_election_timeout()
+
+        response = {
+            "type": APPEND_ENTRIES_RESPONSE,
+            "term": self.current_term,
+            "success": True
+        }
+        self.send_message(addr, response)
+
+    def handle_append_entries_response(self, msg):
+        success = msg["success"]
+        term = msg["term"]
+        self.log(f"Received AppendEntriesResponse: success={success}, term={term}")
+
+        if term > self.current_term:
+            self.log("Follower response with a newer term, stepping down to follower.")
+            self.current_term = term
+            self.role = FOLLOWER
+            self.voted_for = None
+
+    def receive_messages(self):
+        while True:
+            try:
+                data, addr = self.sock.recvfrom(4096)
+                msg = json.loads(data.decode('utf-8'))
+                self.log(f"Received {msg['type']} from {addr}")
+                return msg, addr
+            except BlockingIOError:
+                return None, None
+
+    def run(self):
+        self.log("Starting node.")
+        while True:
+            # Check for election timeout if not a leader
+            if self.role != LEADER and time.time() > self.election_timeout:
+                self.start_election()
+
+            # If leader, send heartbeats regularly
+            if self.role == LEADER and (time.time() - self.last_heartbeat) >= HEARTBEAT_INTERVAL:
+                self.send_heartbeats()
+                self.last_heartbeat = time.time()
+
+            # Process incoming messages
+            msg, addr = self.receive_messages()
+            if msg:
+                msg_type = msg["type"]
+                if msg_type == REQUEST_VOTE:
+                    self.handle_request_vote(msg, addr)
+                elif msg_type == REQUEST_VOTE_RESPONSE:
+                    self.handle_request_vote_response(msg)
+                elif msg_type == APPEND_ENTRIES:
+                    self.handle_append_entries(msg, addr)
+                elif msg_type == APPEND_ENTRIES_RESPONSE:
+                    self.handle_append_entries_response(msg)
+
+            time.sleep(CHECK_INTERVAL)
+
+
+def main():
+    nodes = []
+    peers_list = []
+    for i in range(NUM_NODES):
+        peers_list.append((i, ("127.0.0.1", BASE_PORT + i)))
+
+    for i in range(NUM_NODES):
+        peers = [(pid, addr) for pid, addr in peers_list if pid != i]
+        node = Node(i, peers)
+        nodes.append(node)
+
+    for node in nodes:
+        node.start()
+
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Shutting down nodes...")
+
+if __name__ == "__main__":
+    main()
+
+
